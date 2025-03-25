@@ -1,0 +1,248 @@
+
+---
+title: "Lab 3: COVID-19"
+subtitle: "Ecosystem Science and Sustainability 330"
+author:
+  - name: "Zoe Ellis"
+    email: "zoellis@colostate.edu"
+format:
+  html:
+    theme: flatly
+    toc: true
+---
+
+```{r setup, warning=FALSE}
+
+library(tidyverse)
+library(flextable)
+library(zoo)
+library(lubridate)
+
+
+data <- read_csv('https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv')
+
+my.date <- as.Date("2022-02-01")
+my.state <- "Colorado"
+
+colorado_data <- data %>%
+  filter(state == my.state) %>%
+  group_by(county) %>%
+  arrange(date) %>%
+  mutate(
+    new_cases = cases - lag(cases, default = 0),
+    new_deaths = deaths - lag(deaths, default = 0)
+  ) %>%
+  ungroup()
+
+top_cumulative_cases <- colorado_data %>%
+  filter(date == my.date) %>%
+  group_by(county) %>%
+  summarise(cumulative_cases = max(cases)) %>%
+  arrange(desc(cumulative_cases)) %>%
+  head(5)
+
+top_cumulative_cases %>%
+  flextable() %>%
+  compose(j = "county", value = as_paragraph(as_chunk(county))) %>%
+  compose(j = "cumulative_cases", value = as_paragraph(as_chunk(cumulative_cases)))
+
+ggplot(top_cumulative_cases, aes(x = reorder(county, cumulative_cases), y = cumulative_cases)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Top 5 Colorado Counties by Cumulative COVID-19 Cases",
+       x = "County",
+       y = "Cumulative Cases") +
+  theme_minimal()
+
+top_new_cases <- colorado_data %>%
+  filter(date == my.date) %>%
+  group_by(county) %>%
+  summarise(new_cases = sum(new_cases, na.rm = FALSE)) %>%
+  arrange(desc(new_cases)) %>%
+  head(5)
+
+top_new_cases %>%
+  flextable() %>%
+  compose(j = "county", value = as_paragraph(as_chunk(county))) %>%
+  compose(j = "new_cases", value = as_paragraph(as_chunk(new_cases)))
+
+ggplot(top_new_cases, aes(x = reorder(county, new_cases), y = new_cases)) +
+
+  geom_bar(stat = "identity", fill = "tomato") +
+  coord_flip() +
+  labs(title = "Top 5 Colorado Counties by New COVID-19 Cases",
+       x = "County",
+       y = "New Cases") +
+  theme_minimal()
+
+pop_url <- 'https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv'
+
+population_data <- read_csv(pop_url)
+population_data <- read_csv(pop_url, show_col_types = FALSE)
+
+population_data <- population_data %>%
+  mutate(
+    state_fip = str_pad(as.character(STATE), width = 2, side = "left", pad = "0"),  
+    county_fip = str_pad(as.character(COUNTY), width = 3, side = "left", pad = "0"),  
+    fip_code = paste0(state_fip, county_fip)  
+
+head(population_data)
+
+colorado_data_with_pop <- colorado_data %>%
+  left_join(population_data, by = c("county" = "CTYNAME"))
+
+colorado_data_with_pop <- colorado_data_with_pop %>%
+  mutate(
+    new_cases_per_100k = (new_cases / POPESTIMATE2023) * 100000,
+    new_deaths_per_100k = (new_deaths / POPESTIMATE2023) * 100000
+  )
+
+top_new_cases_per_capita <- colorado_data_with_pop %>%
+  filter(date == my.date) %>%
+  group_by(county) %>%
+  summarise(new_cases_per_100k = sum(new_cases_per_100k, na.rm = FALSE)) %>%
+  arrange(desc(new_cases_per_100k)) %>%
+  head(5)
+
+top_new_cases_per_capita %>%
+  flextable() %>%
+  compose(j = "county", value = as_paragraph(as_chunk(county))) %>%
+  compose(j = "new_cases_per_100k", value = as_paragraph(as_chunk(new_cases_per_100k)))
+
+filtered_top_new_cases_per_capita <- top_new_cases_per_capita %>%
+  filter(!is.na(new_cases_per_100k) & new_cases_per_100k > 0)
+
+ggplot(top_new_cases_per_capita, aes(x = reorder(county, new_cases_per_100k), y = new_cases_per_100k)) +
+  geom_bar(stat = "identity", fill = "darkgreen") +
+  coord_flip() +
+  labs(title = "Top 5 Colorado Counties by New Cases per 100k Residents",
+       x = "County",
+       y = "New Cases per 100k") +
+  theme_minimal() 
+
+colorado_data <- read_csv('https://raw.githubusercontent.com/nytimes/covid-19-data/master/us-counties.csv') %>%
+  filter(state == "Colorado") %>%
+  group_by(county) %>%
+  arrange(date) %>%
+  mutate(new_deaths = deaths - lag(deaths, default = 0)) %>%
+  ungroup()
+covid_deaths_2021 <- colorado_data %>%
+  filter(year(date) == 2021) %>%
+  group_by(county) %>%
+  summarise(covid_deaths_2021 = sum(new_deaths, na.rm = FALSE)) %>%
+  ungroup()
+population_data <- read_csv("https://www2.census.gov/programs-surveys/popest/datasets/2020-2023/counties/totals/co-est2023-alldata.csv") %>%
+  mutate(state_fip = str_pad(as.character(STATE), width = 2, side = "left", pad = "0"),
+         county_fip = str_pad(as.character(COUNTY), width = 3, side = "left", pad = "0"),
+         fip_code = paste0(state_fip, county_fip)) %>%
+  select(CTYNAME, POPESTIMATE2023, DEATHS2021) # 
+deaths_data <- covid_deaths_2021 %>%
+  left_join(population_data, by = c("county" = "CTYNAME")) %>%
+  mutate(covid_death_percentage = (covid_deaths_2021 / DEATHS2021) * 100)
+counties_above_20_percent <- deaths_data %>%
+  filter(covid_death_percentage >= 20)
+ggplot(counties_above_20_percent, aes(x = reorder(county, covid_death_percentage), y = covid_death_percentage)) +
+  geom_bar(stat = "identity", fill = "tomato") +
+  coord_flip() +
+  labs(title = "Counties Where COVID-19 Deaths Account for 20% or More of Annual Deaths in 2021", 
+       x = "County", y = "Percentage of Deaths Attributed to COVID-19") +
+  theme_minimal() 
+
+#in class practice 
+library(tidyverse)
+library(zoo)
+library(dplyr)
+library(ggplot2)
+
+us_states_data <- read.csv("~/Desktop/us-states.csv")
+
+state_covid <- us_states_data %>%
+  group_by(date, state) %>%  
+  summarise(cases = sum(cases, na.rm = TRUE)) %>%  
+  filter(state %in% c('New York', 'Ohio', 'Colorado', 'Alabama')) %>%  
+  group_by(state) %>% 
+  mutate(
+    newCases = cases - lag(cases),  
+    roll = zoo::rollmean(newCases, k = 7, align = "right", fill = NA)  
+  ) %>%
+  ungroup()  
+
+ggplot(state_covid, aes(x = date)) +  
+  geom_col(aes(y = newCases), fill = "pink", col = NA) +  
+  geom_line(aes(y = roll), col = "darkred", size = 1) +  
+  theme_linedraw() +  
+  facet_wrap(~state, nrow = 2, scales = "free_y") +  
+  labs(
+    title = "Cumulative COVID-19 Cases",  
+    x = "Date",  # Label for x-axis
+    y = "Case Count"  # Label for y-axis
+  ) 
+
+# Question 7
+
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(readr)
+```
+
+```{r} 
+library(tidyverse)
+library(sf)
+library(ggplot2)
+library(readr)
+us_states_data <- read_csv("/Users/ZoeEllis/Desktop/us_states_data.csv") 
+
+us_states_data <- us_states_data %>%
+  mutate(
+    state = str_pad(state, 2, pad = "0"), 
+    fips = str_pad(fips, 5, pad = "0")     
+  )
+
+us_states_data <- read_csv("/Users/ZoeEllis/Desktop/us_states_data.csv") 
+
+county_cen <- read_csv('https://raw.githubusercontent.com/mikejohnson51/csu-ess-330/refs/heads/main/resources/county-centroids.csv')
+
+us_states_data <- us_states_data %>%
+  mutate(
+    state = str_pad(state, 2, pad = "0"),  
+    fips = str_pad(fips, 5, pad = "0")     
+  )
+
+county_cen <- county_cen %>%
+  mutate(
+    fips = str_pad(fips, 5, pad = "0")     
+  )
+
+us_states_data_with_centroids <- us_states_data %>%
+  inner_join(county_cen, by = "fips")
+
+head(us_states_data_with_centroids)
+
+us_states_data_with_centroids <- us_states_data_with_centroids %>%
+  group_by(date) %>%  
+  summarise(
+    wmX_c = sum(LON * cases, na.rm = TRUE) / sum(cases, na.rm = TRUE),  
+    wmY_c = sum(LAT * cases, na.rm = TRUE) / sum(cases, na.rm = TRUE),  
+    cases = sum(cases, na.rm = TRUE)  
+  ) %>%
+  ungroup() %>%
+  arrange(date) %>%  
+  mutate(d = row_number())  
+
+
+ggplot(us_states_data_with_centroids) +
+  borders("state", fill = "grey90", colour = "white") +  # State borders
+  geom_point(aes(x = wmX_c, y = wmY_c, size = cases), color = "pink", alpha = 0.75) + 
+  theme_linedraw() +
+  labs(
+    color = "Time", 
+    size = "Cases", 
+    x = "", 
+    y = "", 
+    title = "Weighted Center of Covid-19 Cases"
+  ) +
+  theme(legend.position = "none") +  # Remove the legend
+  coord_cartesian(xlim = c(-130, -60), ylim = c(20, 50))  
+
+```
